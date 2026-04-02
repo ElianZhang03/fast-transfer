@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Fast Transfer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            cream: '#F9F8F6',
+            ink: '#0F2C24',
+            moss: '#1B4332',
+            sage: '#2D6A4F',
+            mist: '#E8E6E1',
+            frame: '#D4D1C9',
+            accent: '#40916C',
+          },
+          fontFamily: { sans: ['Outfit', 'system-ui', 'sans-serif'] },
+          boxShadow: {
+            soft: '0 4px 24px -4px rgba(15, 44, 36, 0.08), 0 2px 8px -2px rgba(15, 44, 36, 0.06)',
+            lift: '0 12px 40px -12px rgba(15, 44, 36, 0.15)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    :root { --ease-out: cubic-bezier(0.22, 1, 0.36, 1); }
+    body {
+      background-color: #F9F8F6;
+      background-image:
+        radial-gradient(ellipse 120% 80% at 50% -20%, rgba(64, 145, 108, 0.06), transparent 55%),
+        linear-gradient(180deg, rgba(212, 209, 201, 0.35) 0%, transparent 28%);
+      min-height: 100dvh;
+    }
+    .grain {
+      pointer-events: none;
+      position: fixed;
+      inset: 0;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      z-index: 0;
+    }
+    .btn-press {
+      transition: transform 0.22s var(--ease-out), box-shadow 0.28s var(--ease-out), background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease;
+    }
+    .btn-press:active { transform: scale(0.97); }
+    .card-frame {
+      border: 1px solid rgba(15, 44, 36, 0.08);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 4px 24px -4px rgba(15, 44, 36, 0.07);
+    }
+    .textarea-glow:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(64, 145, 108, 0.2), 0 4px 20px -4px rgba(15, 44, 36, 0.08);
+      border-color: rgba(45, 106, 79, 0.45);
+    }
+    .progress-track {
+      background: linear-gradient(90deg, rgba(212, 209, 201, 0.6), rgba(232, 230, 225, 0.9));
+      overflow: hidden;
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(105deg, #1B4332 0%, #40916C 48%, #2D6A4F 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2.2s ease-in-out infinite;
+      transition: width 0.25s var(--ease-out);
+    }
+    .progress-fill.idle { animation: none; width: 0%; opacity: 0.85; }
+    @keyframes shimmer {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+    .toast-enter { animation: toastIn 0.45s var(--ease-out) forwards; }
+    .toast-exit { animation: toastOut 0.35s var(--ease-out) forwards; }
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(-12px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; transform: translateY(0) scale(1); }
+      to { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    }
+    .file-row {
+      transition: transform 0.2s var(--ease-out), box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+    .file-row:active { transform: scale(0.99); }
+    .drop-ring { transition: border-color 0.3s ease, background-color 0.3s ease; }
+    .drop-ring.dragover {
+      border-color: rgba(45, 106, 79, 0.55);
+      background: rgba(64, 145, 108, 0.06);
+    }
+    .qr-panel img { image-rendering: pixelated; image-rendering: crisp-edges; }
+    .pop-in { animation: popIn 0.5s var(--ease-out) both; }
+    @keyframes popIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+  </style>
+</head>
+<body class="font-sans text-ink antialiased relative">
+  <div class="grain" aria-hidden="true"></div>
+
+  <div id="toast-root" class="fixed top-0 left-0 right-0 z-[100] flex flex-col items-center gap-2 pt-[max(1rem,env(safe-area-inset-top))] px-4 pointer-events-none"></div>
+  <div id="modal-root" class="fixed inset-0 z-[90] hidden items-center justify-center px-5">
+    <div id="modal-backdrop" class="absolute inset-0 bg-ink/30 backdrop-blur-[2px]"></div>
+    <div id="modal-card" class="relative w-full max-w-sm rounded-2xl bg-white/85 border border-frame card-frame p-5">
+      <p id="modal-title-line" class="text-sm font-medium text-ink"></p>
+      <div id="modal-sub" class="mt-2 text-[11px] text-ink/50 font-light break-all"></div>
+      <div class="mt-4 flex justify-end">
+        <button type="button" id="modal-ok" class="btn-press rounded-xl bg-moss text-cream px-5 py-2.5 text-sm font-medium shadow-soft hover:bg-sage"></button>
+      </div>
+    </div>
+  </div>
+
+  <main class="relative z-10 px-5 pb-12 pt-[max(1.25rem,env(safe-area-inset-top))] max-w-lg mx-auto lg:max-w-5xl lg:flex lg:flex-row lg:gap-10 lg:items-start">
+    <aside class="qr-panel w-full lg:w-52 shrink-0 mb-8 lg:mb-0 lg:sticky lg:top-4">
+      <div class="rounded-2xl bg-white/80 backdrop-blur-sm card-frame p-4 text-center">
+        <p id="i18n-phone-title" class="text-xs tracking-widest uppercase text-moss/50 mb-1"></p>
+        <div class="rounded-xl bg-cream border border-frame p-3 inline-block">
+          <img id="qr-img" src="/api/qr" alt="" class="w-[168px] h-[168px] max-w-full rounded-lg block mx-auto" width="168" height="168" />
+        </div>
+        <p id="lan-url" class="text-[11px] text-ink/55 mt-3 break-all font-mono leading-snug px-1">…</p>
+        <p id="i18n-phone-hint" class="text-[10px] text-ink/30 mt-1 px-1"></p>
+        <button type="button" id="btn-copy-url" class="btn-press mt-3 text-xs text-sage font-medium hover:text-moss border border-frame rounded-lg px-3 py-1.5 bg-white/60 hover:bg-white w-full max-w-[200px] mx-auto"></button>
+      </div>
+    </aside>
+
+    <div class="flex-1 min-w-0 w-full max-w-lg mx-auto lg:mx-0">
+    <header class="mb-8 text-center lg:text-left">
+      <h1 class="text-2xl sm:text-3xl font-light tracking-tight text-ink">
+        Fast Transfer<span id="brand-zh" class="text-moss/85"> 快传</span>
+      </h1>
+      <p id="i18n-tagline" class="text-sm text-ink/45 mt-2 font-light"></p>
+    </header>
+
+    <section class="mb-10">
+      <div class="rounded-2xl bg-white/70 backdrop-blur-sm card-frame p-5">
+        <div class="flex items-baseline justify-between mb-4 gap-3">
+          <h2 id="i18n-msg-heading" class="text-xs tracking-widest uppercase text-moss/50"></h2>
+          <span id="i18n-msg-sync" class="text-[11px] text-ink/35 font-light shrink-0"></span>
+        </div>
+
+        <div id="msg-empty" class="hidden text-center py-10 font-light">
+          <p id="i18n-msg-empty" class="text-sm text-ink/35"></p>
+        </div>
+        <ul id="msg-list" class="space-y-3"></ul>
+
+        <div class="mt-4 pt-4 border-t border-frame/70">
+          <textarea
+            id="msg-input"
+            rows="3"
+            class="w-full resize-none rounded-xl border border-frame bg-cream/80 px-4 py-3 text-[15px] leading-relaxed text-ink/90 placeholder:text-ink/25 textarea-glow transition-all duration-300"
+          ></textarea>
+          <div class="flex items-center justify-between gap-3 mt-3">
+            <p id="i18n-msg-hint" class="text-[11px] text-ink/35 font-light max-w-[60%]"></p>
+            <button type="button" id="btn-send" class="btn-press rounded-xl bg-moss text-cream px-5 py-3 text-sm font-medium shadow-soft hover:bg-sage hover:shadow-lift min-w-[4.5rem]"></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-10">
+      <div class="rounded-2xl bg-white/70 backdrop-blur-sm card-frame p-5">
+        <label id="i18n-files-heading" class="block text-xs tracking-widest uppercase text-moss/50 mb-3"></label>
+        <input type="file" id="file-input" class="hidden" multiple />
+        <button
+          type="button"
+          id="pick-files"
+          class="drop-ring btn-press w-full rounded-2xl border-2 border-dashed border-frame py-10 px-4 text-center hover:border-moss/25 group"
+        >
+          <span id="i18n-pick-title" class="block text-moss/70 text-sm font-medium group-hover:text-moss transition-colors"></span>
+          <span id="i18n-pick-sub" class="block text-xs text-ink/35 mt-2 font-light"></span>
+        </button>
+        <div class="mt-4 rounded-xl progress-track h-2">
+          <div id="progress-bar" class="progress-fill idle rounded-full"></div>
+        </div>
+        <p id="upload-status" class="text-xs text-ink/40 mt-2 text-center min-h-[1.25rem] font-light"></p>
+
+        <div class="mt-5 pt-5 border-t border-frame/70">
+          <div class="flex items-baseline justify-between mb-4 px-1">
+            <span id="i18n-files-hint" class="text-[11px] text-ink/35 font-light"></span>
+          </div>
+          <ul id="file-list" class="space-y-3"></ul>
+          <div id="file-empty" class="hidden text-center py-10 font-light">
+            <span id="i18n-file-empty" class="text-sm text-ink/35"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+    </div>
+  </main>
+
+  <footer class="relative z-10 text-center text-[11px] text-ink/30 font-light tracking-wide pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-2 px-5">
+    <span id="i18n-footer"></span>
+  </footer>
+
+  <script>
+    (async function () {
+      const I18N = {
+        zh: {
+          pageTitle: 'Fast Transfer 快传 · 消息与文件',
+          tagline: '离线安全传输',
+          phoneTitle: '手机连接',
+          phoneHint: '在手机上用浏览器打开此地址',
+          copyLink: '复制链接',
+          qrAlt: '局域网连接二维码',
+          msgHeading: '文字传输',
+          msgSync: '每 2 秒同步',
+          msgEmpty: '还没有消息，发一条给局域网里的设备吧',
+          msgPlaceholder: '输入一段文字，然后发送…',
+          msgHint: '支持多端同步，删除将对所有设备生效',
+          send: '发送',
+          filesHeading: '文件传输',
+          pickTitle: '点击选择文件',
+          pickSub: '支持多选 · 图片 / 视频 / 文档 · 本机与各设备共享',
+          filesAutoRefresh: '自动刷新',
+          fileEmpty: '暂无文件，上传后将显示于此',
+          footer: '开发者：Zx',
+          modalSaved: '已成功下载',
+          modalOk: '知道了',
+          savedTo: '文件已保存到',
+          copy: '复制',
+          del: '删除',
+          download: '下载',
+          uploading: '上传中…',
+          uploadOk: '上传成功',
+          uploadFail: '上传失败',
+          netErr: '网络错误',
+          linkCopied: '链接已复制',
+          copyFail: '复制失败',
+          msgSyncFail: '消息同步失败',
+          sendFail: '发送失败',
+          copied: '已复制',
+          deleteFail: '删除失败',
+          loadFilesFail: '加载列表失败',
+          downloadFail: '下载失败',
+          lanError: '无法获取地址',
+          dash: '—',
+        },
+        en: {
+          pageTitle: 'Fast Transfer · Messages & files',
+          tagline: 'Secure transfer on your local network',
+          phoneTitle: 'Connect your phone',
+          phoneHint: 'Open this address in your phone’s browser',
+          copyLink: 'Copy link',
+          qrAlt: 'QR code to open Fast Transfer',
+          msgHeading: 'Messages',
+          msgSync: 'Every 2s',
+          msgEmpty: 'No messages yet — send one to devices on your network',
+          msgPlaceholder: 'Type a note, then send…',
+          msgHint: 'Synced — delete removes the note for everyone',
+          send: 'Send',
+          filesHeading: 'Files',
+          pickTitle: 'Tap to choose files',
+          pickSub: 'Multi-select · photos, videos, documents · shared on your LAN',
+          filesAutoRefresh: 'Auto refresh',
+          fileEmpty: 'No files yet — upload to share',
+          footer: 'Developer: Zx',
+          modalSaved: 'Downloaded',
+          modalOk: 'OK',
+          savedTo: 'Saved to',
+          copy: 'Copy',
+          del: 'Delete',
+          download: 'Download',
+          uploading: 'Uploading…',
+          uploadOk: 'Upload complete',
+          uploadFail: 'Upload failed',
+          netErr: 'Network error',
+          linkCopied: 'Link copied',
+          copyFail: 'Copy failed',
+          msgSyncFail: 'Could not sync messages',
+          sendFail: 'Send failed',
+          copied: 'Copied',
+          deleteFail: 'Delete failed',
+          loadFilesFail: 'Could not load files',
+          downloadFail: 'Download failed',
+          lanError: 'Could not get address',
+          dash: '—',
+        },
+      };
+
+      /** 界面语言以当前请求为准：由服务端解析 Accept-Language（手机浏览器 = 手机系统语言） */
+      async function fetchLocale() {
+        try {
+          const r = await fetch('/api/locale');
+          const d = await r.json();
+          return d.lang === 'zh' ? 'zh' : 'en';
+        } catch (e) {
+          return 'en';
+        }
+      }
+
+      let LANG = await fetchLocale();
+      function t(k) {
+        return (I18N[LANG] && I18N[LANG][k]) || I18N.en[k] || k;
+      }
+
+      function applyI18n() {
+        document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
+        document.title = t('pageTitle');
+        const zhSub = document.getElementById('brand-zh');
+        if (zhSub) {
+          if (LANG === 'zh') { zhSub.textContent = ' 快传'; zhSub.classList.remove('hidden'); }
+          else { zhSub.textContent = ''; zhSub.classList.add('hidden'); }
+        }
+        const map = [
+          ['i18n-tagline', 'tagline'],
+          ['i18n-phone-title', 'phoneTitle'],
+          ['i18n-phone-hint', 'phoneHint'],
+          ['btn-copy-url', 'copyLink'],
+          ['i18n-msg-heading', 'msgHeading'],
+          ['i18n-msg-sync', 'msgSync'],
+          ['i18n-msg-empty', 'msgEmpty'],
+          ['i18n-msg-hint', 'msgHint'],
+          ['btn-send', 'send'],
+          ['i18n-files-heading', 'filesHeading'],
+          ['i18n-pick-title', 'pickTitle'],
+          ['i18n-pick-sub', 'pickSub'],
+          ['i18n-files-hint', 'filesAutoRefresh'],
+          ['i18n-file-empty', 'fileEmpty'],
+          ['i18n-footer', 'footer'],
+          ['modal-title-line', 'modalSaved'],
+          ['modal-ok', 'modalOk'],
+        ];
+        map.forEach(([id, key]) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = t(key);
+        });
+        const qr = document.getElementById('qr-img');
+        if (qr) qr.alt = t('qrAlt');
+        const ta = document.getElementById('msg-input');
+        if (ta) ta.placeholder = t('msgPlaceholder');
+      }
+
+      applyI18n();
+
+      const $ = (id) => document.getElementById(id);
+      const toastRoot = $('toast-root');
+      const progressBar = $('progress-bar');
+      const uploadStatus = $('upload-status');
+      const fileList = $('file-list');
+      const fileEmpty = $('file-empty');
+      const lanUrlEl = $('lan-url');
+      const qrImg = $('qr-img');
+      const msgList = $('msg-list');
+      const msgEmpty = $('msg-empty');
+      const msgInput = $('msg-input');
+      const modalRoot = $('modal-root');
+      const modalBackdrop = $('modal-backdrop');
+      const modalOk = $('modal-ok');
+      const modalSub = $('modal-sub');
+      const modalTitleLine = $('modal-title-line');
+
+      let lastLanUrl = '';
+
+      function escapeHtml(s) {
+        return String(s || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function showToast(message, variant) {
+        const wrap = document.createElement('div');
+        wrap.className =
+          'toast-enter pointer-events-auto max-w-sm w-full rounded-2xl px-5 py-3.5 text-sm font-medium shadow-lift border backdrop-blur-md text-left ' +
+          (variant === 'error'
+            ? 'bg-red-950/90 text-red-50 border-red-800/40'
+            : 'bg-ink/92 text-cream border-white/10');
+        wrap.textContent = message;
+        toastRoot.appendChild(wrap);
+        const tid = setTimeout(() => {
+          wrap.classList.remove('toast-enter');
+          wrap.classList.add('toast-exit');
+          wrap.addEventListener('animationend', () => wrap.remove(), { once: true });
+        }, 2200);
+        wrap.addEventListener('click', () => {
+          clearTimeout(tid);
+          wrap.classList.add('toast-exit');
+          wrap.addEventListener('animationend', () => wrap.remove(), { once: true });
+        });
+      }
+
+      function isDesktopApp() {
+        return !!(window.pywebview && window.pywebview.api);
+      }
+
+      function showModalDownloaded(path) {
+        if (!modalRoot) return;
+        if (modalTitleLine) modalTitleLine.textContent = t('modalSaved');
+        const safe = escapeHtml(path);
+        modalSub.innerHTML =
+          '<div class="text-[11px] text-ink/45 mb-1">' + escapeHtml(t('savedTo')) + '</div>' +
+          '<div class="font-mono text-ink/75">' + safe + '</div>';
+        modalRoot.classList.remove('hidden');
+        modalRoot.classList.add('flex');
+      }
+
+      function hideModal() {
+        if (!modalRoot) return;
+        modalRoot.classList.add('hidden');
+        modalRoot.classList.remove('flex');
+      }
+
+      modalBackdrop.addEventListener('click', hideModal);
+      modalOk.addEventListener('click', hideModal);
+
+      async function loadServerInfo() {
+        try {
+          const r = await fetch('/api/server-info');
+          const d = await r.json();
+          lastLanUrl = String(d.lan_url || '').trim();
+          if (lanUrlEl) lanUrlEl.textContent = lastLanUrl || t('dash');
+          if (qrImg) qrImg.src = '/api/qr?t=' + Date.now();
+        } catch (e) {
+          lastLanUrl = '';
+          if (lanUrlEl) lanUrlEl.textContent = t('lanError');
+        }
+      }
+
+      $('btn-copy-url').addEventListener('click', async () => {
+        const url = lastLanUrl;
+        if (!url || url === t('dash') || url === t('lanError')) return;
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast(t('linkCopied'));
+        } catch (e) {
+          showToast(t('copyFail'), 'error');
+        }
+      });
+
+      async function copyText(text) {
+        const x = String(text || '');
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(x);
+            return true;
+          }
+        } catch (e) {}
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = x;
+          ta.setAttribute('readonly', 'true');
+          ta.style.position = 'fixed';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          return !!ok;
+        } catch (e) {
+          return false;
+        }
+      }
+
+      let lastMsgIds = new Set();
+      function renderMessages(msgs) {
+        msgList.innerHTML = '';
+        if (!msgs || !msgs.length) {
+          msgEmpty.classList.remove('hidden');
+          lastMsgIds = new Set();
+          return;
+        }
+        msgEmpty.classList.add('hidden');
+        const nextIds = new Set();
+        msgs.forEach((m) => {
+          const id = m.id;
+          nextIds.add(String(id));
+          const isNew = !lastMsgIds.has(String(id));
+          const li = document.createElement('li');
+          li.className = isNew ? 'pop-in' : '';
+          const text = String(m.text || '');
+          const ts = String(m.timestamp || '');
+          const cpy = escapeHtml(t('copy'));
+          const delt = escapeHtml(t('del'));
+          li.innerHTML =
+            '<div class="rounded-2xl bg-white/80 border border-frame card-frame px-4 py-3.5">' +
+              '<div class="flex items-start justify-between gap-3">' +
+                '<div class="min-w-0 flex-1">' +
+                  '<div class="text-[15px] leading-relaxed text-ink/90 whitespace-pre-wrap break-words">' + escapeHtml(text) + '</div>' +
+                  (ts ? ('<div class="mt-2 text-[11px] text-ink/35 font-light">' + escapeHtml(ts) + '</div>') : '') +
+                '</div>' +
+              '</div>' +
+              '<div class="mt-3 flex items-center justify-end gap-3">' +
+                '<button type="button" class="btn-press px-3 py-2 rounded-lg border border-frame bg-white/60 text-sage hover:text-moss hover:bg-white text-xs" data-action="copy" data-id="' + id + '">' + cpy + '</button>' +
+                '<button type="button" class="btn-press px-3 py-2 rounded-lg border border-frame bg-white/60 text-ink/60 hover:text-red-800 hover:bg-white text-xs" data-action="delete" data-id="' + id + '">' + delt + '</button>' +
+              '</div>' +
+            '</div>';
+          li.dataset.id = String(id);
+          li.dataset.text = text;
+          msgList.appendChild(li);
+        });
+        lastMsgIds = nextIds;
+      }
+
+      async function loadMessages(opts) {
+        const silent = opts && opts.silent;
+        try {
+          const r = await fetch('/api/messages');
+          const d = await r.json();
+          renderMessages(d.messages || []);
+        } catch (e) {
+          if (!silent) showToast(t('msgSyncFail'), 'error');
+        }
+      }
+
+      async function sendMessage() {
+        const text = (msgInput.value || '').trim();
+        if (!text) return;
+        try {
+          const r = await fetch('/api/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+          });
+          if (!r.ok) throw new Error();
+          msgInput.value = '';
+          await loadMessages({ silent: true });
+        } catch (e) {
+          showToast(t('sendFail'), 'error');
+        }
+      }
+
+      $('btn-send').addEventListener('click', sendMessage);
+      msgInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      msgList.addEventListener('click', async (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('button[data-action]') : null;
+        if (!btn) return;
+        const action = btn.getAttribute('data-action');
+        const id = btn.getAttribute('data-id');
+        const li = btn.closest('li');
+        const text = li ? li.dataset.text : '';
+        if (action === 'copy') {
+          const ok = await copyText(text || '');
+          showToast(ok ? t('copied') : t('copyFail'), ok ? undefined : 'error');
+          return;
+        }
+        if (action === 'delete') {
+          try {
+            const r = await fetch('/api/messages/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (!r.ok) throw new Error();
+            await loadMessages({ silent: true });
+          } catch (e2) {
+            showToast(t('deleteFail'), 'error');
+          }
+        }
+      });
+
+      function fileIcon(name) {
+        const ext = (name.split('.').pop() || '').toLowerCase();
+        const map = {
+          jpg: '🖼', jpeg: '🖼', png: '🖼', gif: '🖼', webp: '🖼', heic: '🖼',
+          mp4: '🎬', mov: '🎬', mkv: '🎬', avi: '🎬',
+          mp3: '🎵', wav: '🎵', flac: '🎵',
+          pdf: '📄', doc: '📝', docx: '📝', txt: '📝', md: '📝',
+          zip: '📦', rar: '📦', '7z': '📦',
+        };
+        return map[ext] || '📎';
+      }
+
+      function formatSize(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      let lastFileKeySet = new Set();
+      async function loadFiles(opts) {
+        const silent = opts && opts.silent;
+        try {
+          const r = await fetch('/api/files');
+          const data = await r.json();
+          const files = data.files || [];
+          fileList.innerHTML = '';
+          if (!files.length) {
+            fileEmpty.classList.remove('hidden');
+            lastFileKeySet = new Set();
+            return;
+          }
+          fileEmpty.classList.add('hidden');
+          const nextKeys = new Set();
+          const dl = escapeHtml(t('download'));
+          files.forEach((f) => {
+            const key = String(f.name || '') + '|' + String(f.size || 0);
+            nextKeys.add(key);
+            const isNew = !lastFileKeySet.has(key);
+            const li = document.createElement('li');
+            li.className = isNew ? 'pop-in' : '';
+            const safeName = (f.name || '').replaceAll('"', '&quot;');
+            const actionBtn = isDesktopApp()
+              ? ('<button type="button" data-action="save-dialog" data-name="' + safeName + '" class="btn-press text-xs shrink-0 rounded-lg px-3 py-2.5 bg-moss text-cream font-medium hover:bg-sage shadow-soft min-w-[4.5rem]">' + dl + '</button>')
+              : ('<a href="' + f.url + '" target="_blank" rel="noopener" download class="btn-press text-xs shrink-0 rounded-lg px-3 py-2.5 bg-moss text-cream font-medium hover:bg-sage shadow-soft min-w-[4.5rem]">' + dl + '</a>');
+
+            li.innerHTML =
+              '<div class="file-row flex items-center gap-4 rounded-2xl bg-white/75 border border-frame px-4 py-3.5 card-frame hover:border-moss/20 hover:shadow-soft active:shadow-none">' +
+              '<span class="text-2xl shrink-0 w-10 h-10 flex items-center justify-center rounded-xl bg-mist/80">' +
+              fileIcon(f.name || '') +
+              '</span>' +
+              '<span class="min-w-0 flex-1">' +
+              '<span class="block text-sm font-medium text-ink/90 truncate" title="' + safeName + '">' +
+              (f.name || '') +
+              '</span>' +
+              '<span class="block text-xs text-ink/40 mt-0.5">' +
+              formatSize(f.size || 0) +
+              (f.ext ? (' · ' + String(f.ext).toUpperCase()) : '') +
+              '</span>' +
+              '</span>' +
+              actionBtn +
+              '</div>';
+            fileList.appendChild(li);
+          });
+          lastFileKeySet = nextKeys;
+        } catch (e) {
+          if (!silent) showToast(t('loadFilesFail'), 'error');
+        }
+      }
+
+      const fileInput = $('file-input');
+      const pickBtn = $('pick-files');
+
+      pickBtn.addEventListener('click', () => fileInput.click());
+
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((ev) => {
+        pickBtn.addEventListener(ev, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+      });
+      pickBtn.addEventListener('dragover', () => pickBtn.classList.add('dragover'));
+      pickBtn.addEventListener('dragleave', () => pickBtn.classList.remove('dragover'));
+      pickBtn.addEventListener('drop', (e) => {
+        pickBtn.classList.remove('dragover');
+        const files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) uploadFiles(files);
+      });
+
+      function uploadFiles(fileListObj) {
+        const files = Array.from(fileListObj);
+        if (!files.length) return;
+        const fd = new FormData();
+        files.forEach((f) => fd.append('files', f));
+
+        progressBar.classList.remove('idle');
+        uploadStatus.textContent = t('uploading');
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload');
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            progressBar.style.width = pct + '%';
+          }
+        };
+        xhr.onload = () => {
+          progressBar.style.width = '100%';
+          setTimeout(() => {
+            progressBar.style.width = '0%';
+            progressBar.classList.add('idle');
+          }, 400);
+          uploadStatus.textContent = '';
+          fileInput.value = '';
+          if (xhr.status >= 200 && xhr.status < 300) {
+            showToast(t('uploadOk'));
+            loadFiles({ silent: true });
+          } else {
+            showToast(t('uploadFail'), 'error');
+          }
+        };
+        xhr.onerror = () => {
+          progressBar.classList.add('idle');
+          progressBar.style.width = '0%';
+          uploadStatus.textContent = '';
+          showToast(t('netErr'), 'error');
+        };
+        xhr.send(fd);
+      }
+
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files && fileInput.files.length) uploadFiles(fileInput.files);
+      });
+
+      fileList.addEventListener('click', async (e) => {
+        const btn = e.target && e.target.closest ? e.target.closest('button[data-action="save-dialog"]') : null;
+        if (!btn) return;
+        const name = btn.getAttribute('data-name') || '';
+        try {
+          if (!isDesktopApp()) return;
+          const res = await window.pywebview.api.save_with_dialog(name);
+          if (res && res.ok) {
+            showModalDownloaded(res.path || res.dir || '');
+          } else {
+            if (res && res.cancelled) return;
+            showToast((res && res.error) ? res.error : t('downloadFail'), 'error');
+          }
+        } catch (err) {
+          showToast(t('downloadFail'), 'error');
+        }
+      });
+
+      loadServerInfo();
+      loadMessages({ silent: true });
+      loadFiles({ silent: true });
+      setInterval(() => loadMessages({ silent: true }), 2000);
+      setInterval(() => loadFiles({ silent: true }), 3000);
+    })();
+  </script>
+</body>
+</html>
